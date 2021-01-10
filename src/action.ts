@@ -9,7 +9,7 @@ import filter from "lodash/filter"
 import map from "lodash/map"
 import strip from "strip-ansi"
 import table from "markdown-table"
-import { createCoverageMap, CoverageMapData } from "istanbul-lib-coverage"
+import {createCoverageMap, CoverageMapData, CoverageMap} from "istanbul-lib-coverage"
 import type { FormattedTestResults } from "@jest/test-result/build/types"
 
 const ACTION_NAME = "jest-github-action"
@@ -43,9 +43,15 @@ export async function run() {
     const checkPayload = getCheckPayload(results, CWD)
     await octokit.checks.create(checkPayload)
 
+    const covMap = createCoverageMap((results.coverageMap as unknown) as CoverageMapData)
+    const statementsCov = covMap.getCoverageSummary().statements.pct.toString();
+
+    core.info("All statements coverage: " + statementsCov + "% I" )
+    core.warning("All statements coverage: " + statementsCov + "% W" )
+
     // Coverage comments
     if (getPullId() && shouldCommentCoverage()) {
-      const comment = getCoverageTable(results, CWD)
+      const comment = getComment(covMap, statementsCov, CWD)
       if (comment) {
         await deletePreviousComments(octokit)
         const commentPayload = getCommentPayload(comment)
@@ -86,14 +92,24 @@ function shouldRunOnlyChangedFiles(): boolean {
   return Boolean(JSON.parse(core.getInput("changes-only", { required: false })))
 }
 
+function getComment(
+    covMap: CoverageMap,
+    statementsCov: string,
+    cwd: string,
+): string | false {
+
+  const coverageTable = getCoverageTable(covMap, cwd)
+  if (coverageTable){
+    return COVERAGE_HEADER + "All statements coverage: " + statementsCov + "%/n" + coverageTable
+  }
+  return false
+}
+
 export function getCoverageTable(
-  results: FormattedTestResults,
+  covMap: CoverageMap,
   cwd: string,
 ): string | false {
-  if (!results.coverageMap) {
-    return ""
-  }
-  const covMap = createCoverageMap((results.coverageMap as unknown) as CoverageMapData)
+
   const rows = [["Filename", "Statements", "Branches", "Functions", "Lines"]]
 
   if (!Object.keys(covMap.data).length) {
@@ -112,7 +128,7 @@ export function getCoverageTable(
     ])
   }
 
-  return COVERAGE_HEADER + table(rows, { align: ["l", "r", "r", "r", "r"] })
+  return table(rows, { align: ["l", "r", "r", "r", "r"] })
 }
 
 function getCommentPayload(body: string) {
