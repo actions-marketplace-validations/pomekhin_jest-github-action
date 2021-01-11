@@ -1,5 +1,6 @@
 # Jest Github Action
 
+
 Main features:
 
 - Add status checks with code annotations to your pull requests
