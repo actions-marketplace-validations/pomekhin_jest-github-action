@@ -14,6 +14,7 @@ import type { FormattedTestResults } from "@jest/test-result/build/types"
 
 const ACTION_NAME = "jest-github-action"
 const COVERAGE_HEADER = ":loop: **Code coverage**\n\n"
+const TOTAL_COVERAGE_HEADER = "All statements coverage: "
 
 export async function run() {
   let workingDirectory = core.getInput("working-directory", { required: false })
@@ -44,10 +45,23 @@ export async function run() {
     await octokit.checks.create(checkPayload)
 
     const covMap = createCoverageMap((results.coverageMap as unknown) as CoverageMapData)
-    const statementsCov = covMap.getCoverageSummary().statements.pct.toString();
+    const statementsCov = covMap.getCoverageSummary().statements.pct;
 
-    core.info("All statements coverage: " + statementsCov + "% I" )
-    core.warning("All statements coverage: " + statementsCov + "% W" )
+    core.info("All statements coverage: " + statementsCov + "%" )
+
+    const minCov = getMinCoverage()
+    const isPR = !!getPullId()
+
+    if(statementsCov < minCov){
+      const errString = "Statements coverage less then minimum! (minimum: " + minCov + "%; actual: " + statementsCov + "% )"
+
+      if(isPR){
+        core.error(errString)
+        core.setFailed(errString)
+      }else{
+        core.warning(errString)
+      }
+    }
 
     // Coverage comments
     if (getPullId() && shouldCommentCoverage()) {
@@ -92,15 +106,19 @@ function shouldRunOnlyChangedFiles(): boolean {
   return Boolean(JSON.parse(core.getInput("changes-only", { required: false })))
 }
 
+function getMinCoverage(): number {
+  return Number(JSON.parse(core.getInput("min-coverage", { required: false })))
+}
+
 function getComment(
     covMap: CoverageMap,
-    statementsCov: string,
+    statementsCov: number,
     cwd: string,
 ): string | false {
 
   const coverageTable = getCoverageTable(covMap, cwd)
   if (coverageTable){
-    return COVERAGE_HEADER + "All statements coverage: " + statementsCov + "%/n" + coverageTable
+    return COVERAGE_HEADER + TOTAL_COVERAGE_HEADER + statementsCov + "%\n" + coverageTable
   }
   return false
 }
@@ -159,7 +177,6 @@ function getCheckPayload(results: FormattedTestResults, cwd: string) {
       annotations: getAnnotations(results, cwd),
     },
   }
-  console.debug("Check payload: %j", payload)
   return payload
 }
 
@@ -179,9 +196,7 @@ function getJestCommand(resultsFile: string) {
 }
 
 function parseResults(resultsFile: string): FormattedTestResults {
-  const results = JSON.parse(readFileSync(resultsFile, "utf-8"))
-  console.debug("Jest results: %j", results)
-  return results
+  return JSON.parse(readFileSync(resultsFile, "utf-8"))
 }
 
 async function execJest(cmd: string, cwd?: string) {

@@ -20,6 +20,10 @@ inputs:
     description: "Only run tests on changed files (over base branch)"
     required: false
     default: "false"
+  min-coverage:
+    description: "Minimum statements coverage coverage for PR (percent)."
+    required: false
+    default: "0"
 
 runs:
   using: "node12"
