@@ -1,23 +1,23 @@
-import { sep, join, resolve } from "path"
-import { readFileSync } from "fs"
-import { exec } from "@actions/exec"
+import {join, resolve, sep} from "path"
+import {readFileSync} from "fs"
+import {exec} from "@actions/exec"
 import * as core from "@actions/core"
-import { GitHub, context } from "@actions/github"
-import type { Octokit } from "@octokit/rest"
+import {context, GitHub} from "@actions/github"
+import type {Octokit} from "@octokit/rest"
 import flatMap from "lodash/flatMap"
 import filter from "lodash/filter"
 import map from "lodash/map"
 import strip from "strip-ansi"
 import table from "markdown-table"
-import {createCoverageMap, CoverageMapData, CoverageMap} from "istanbul-lib-coverage"
-import type { FormattedTestResults } from "@jest/test-result/build/types"
+import {CoverageMap, CoverageMapData, createCoverageMap} from "istanbul-lib-coverage"
+import type {FormattedTestResults} from "@jest/test-result/build/types"
 
-const ACTION_NAME = "jest-github-action"
+const ACTION_NAME = "jest-result"
 const COVERAGE_HEADER = ":loop: **Code coverage**\n\n"
 const TOTAL_COVERAGE_HEADER = "All statements coverage: "
 
 export async function run() {
-  let workingDirectory = core.getInput("working-directory", { required: false })
+  let workingDirectory = core.getInput("working-directory", {required: false})
   let cwd = workingDirectory ? resolve(workingDirectory) : process.cwd()
   const CWD = cwd + sep
   const RESULTS_FILE = join(CWD, "jest.results.json")
@@ -40,32 +40,34 @@ export async function run() {
     // Parse results
     const results = parseResults(RESULTS_FILE)
 
-    // Checks
-    const checkPayload = getCheckPayload(results, CWD)
-    await octokit.checks.create(checkPayload)
-
     const covMap = createCoverageMap((results.coverageMap as unknown) as CoverageMapData)
     const statementsCov = covMap.getCoverageSummary().statements.pct;
 
-    core.info("All statements coverage: " + statementsCov + "%" )
+    core.info("All statements coverage: " + statementsCov + "%")
 
     const minCov = getMinCoverage()
     const isPR = !!getPullId()
 
-    if(statementsCov < minCov){
-      const errString = "Statements coverage less then minimum! (minimum: " + minCov + "%; actual: " + statementsCov + "% )"
+    const isCovOk = statementsCov >= minCov
+    let covErrString = ""
+    const comment = getComment(covMap, statementsCov, CWD)
 
-      if(isPR){
-        core.error(errString)
-        core.setFailed(errString)
-      }else{
-        core.warning(errString)
+    if (!isCovOk) {
+      covErrString = `Statements coverage less then minimum! (minimum: ${minCov}%; actual: ${statementsCov}% )`
+
+      if (isPR) {
+        core.error(covErrString)
+        core.setFailed(covErrString)
+      } else {
+        core.warning(covErrString)
       }
     }
 
+    const checkPayload = getCheckPayload(results, CWD, isCovOk, covErrString, comment)
+    await octokit.checks.create(checkPayload)
+
     // Coverage comments
     if (getPullId() && shouldCommentCoverage()) {
-      const comment = getComment(covMap, statementsCov, CWD)
       if (comment) {
         await deletePreviousComments(octokit)
         const commentPayload = getCommentPayload(comment)
@@ -83,7 +85,7 @@ export async function run() {
 }
 
 async function deletePreviousComments(octokit: GitHub) {
-  const { data } = await octokit.issues.listComments({
+  const {data} = await octokit.issues.listComments({
     ...context.repo,
     per_page: 100,
     issue_number: getPullId(),
@@ -94,30 +96,30 @@ async function deletePreviousComments(octokit: GitHub) {
         (c) =>
           c.user.login === "github-actions[bot]" && c.body.startsWith(COVERAGE_HEADER),
       )
-      .map((c) => octokit.issues.deleteComment({ ...context.repo, comment_id: c.id })),
+      .map((c) => octokit.issues.deleteComment({...context.repo, comment_id: c.id})),
   )
 }
 
 function shouldCommentCoverage(): boolean {
-  return Boolean(JSON.parse(core.getInput("coverage-comment", { required: false })))
+  return Boolean(JSON.parse(core.getInput("coverage-comment", {required: false})))
 }
 
 function shouldRunOnlyChangedFiles(): boolean {
-  return Boolean(JSON.parse(core.getInput("changes-only", { required: false })))
+  return Boolean(JSON.parse(core.getInput("changes-only", {required: false})))
 }
 
 function getMinCoverage(): number {
-  return Number(JSON.parse(core.getInput("min-coverage", { required: false })))
+  return Number(JSON.parse(core.getInput("min-coverage", {required: false})))
 }
 
 function getComment(
-    covMap: CoverageMap,
-    statementsCov: number,
-    cwd: string,
+  covMap: CoverageMap,
+  statementsCov: number,
+  cwd: string,
 ): string | false {
 
   const coverageTable = getCoverageTable(covMap, cwd)
-  if (coverageTable){
+  if (coverageTable) {
     return COVERAGE_HEADER + TOTAL_COVERAGE_HEADER + statementsCov + "%\n" + coverageTable
   }
   return false
@@ -136,7 +138,7 @@ export function getCoverageTable(
   }
 
   for (const [filename, data] of Object.entries(covMap.data || {})) {
-    const { data: summary } = data.toSummary()
+    const {data: summary} = data.toSummary()
     rows.push([
       filename.replace(cwd, ""),
       summary.statements.pct + "%",
@@ -146,7 +148,7 @@ export function getCoverageTable(
     ])
   }
 
-  return table(rows, { align: ["l", "r", "r", "r", "r"] })
+  return table(rows, {align: ["l", "r", "r", "r", "r"]})
 }
 
 function getCommentPayload(body: string) {
@@ -158,22 +160,49 @@ function getCommentPayload(body: string) {
   return payload
 }
 
-function getCheckPayload(results: FormattedTestResults, cwd: string) {
+function getCheckPayload(results: FormattedTestResults,
+                         cwd: string,
+                         isCovOk: boolean,
+                         covErrString: string,
+                         comment: string | false
+) {
+  let conclusion:
+    | "success"
+    | "failure"
+    | "neutral"
+  let title
+
+  if (results.success) {
+    if (isCovOk) {
+      conclusion = "success"
+      title = "Jest tests passed"
+    } else {
+      conclusion = "neutral"
+      title = covErrString
+    }
+  } else {
+    conclusion = "failure"
+    title = "Jest tests failed"
+  }
+
+  const testSummary = results.success
+    ? `${results.numPassedTests} tests passing in ${
+      results.numPassedTestSuites
+    } suite${results.numPassedTestSuites > 1 ? "s" : ""}.`
+    : `Failed tests: ${results.numFailedTests}/${results.numTotalTests}. Failed suites: ${results.numFailedTests}/${results.numTotalTestSuites}.`
+
+  const summary = testSummary + "\n\n" + comment
+
   const payload: Octokit.ChecksCreateParams = {
     ...context.repo,
     head_sha: getSha(),
     name: ACTION_NAME,
     status: "completed",
-    conclusion: results.success ? "success" : "failure",
+    conclusion: conclusion,
     output: {
-      title: results.success ? "Jest tests passed" : "Jest tests failed",
+      title: title,
       text: getOutputText(results),
-      summary: results.success
-        ? `${results.numPassedTests} tests passing in ${
-            results.numPassedTestSuites
-          } suite${results.numPassedTestSuites > 1 ? "s" : ""}.`
-        : `Failed tests: ${results.numFailedTests}/${results.numTotalTests}. Failed suites: ${results.numFailedTests}/${results.numTotalTestSuites}.`,
-
+      summary: summary,
       annotations: getAnnotations(results, cwd),
     },
   }
@@ -181,7 +210,7 @@ function getCheckPayload(results: FormattedTestResults, cwd: string) {
 }
 
 function getJestCommand(resultsFile: string) {
-  let cmd = core.getInput("test-command", { required: false })
+  let cmd = core.getInput("test-command", {required: false})
   const jestOptions = `--testLocationInResults --json ${
     shouldCommentCoverage() ? "--coverage" : ""
   } ${
@@ -201,7 +230,7 @@ function parseResults(resultsFile: string): FormattedTestResults {
 
 async function execJest(cmd: string, cwd?: string) {
   try {
-    await exec(cmd, [], { silent: true, cwd })
+    await exec(cmd, [], {silent: true, cwd})
     console.debug("Jest command executed")
   } catch (e) {
     console.error("Jest execution failed. Tests have likely failed.", e)
