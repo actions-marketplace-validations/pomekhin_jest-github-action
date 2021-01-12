@@ -177,7 +177,7 @@ function getCheckPayload(results: FormattedTestResults,
       conclusion = "success"
       title = "Jest tests passed"
     } else {
-      conclusion = "neutral"
+      conclusion = "failure"
       title = covErrString
     }
   } else {
