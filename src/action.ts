@@ -12,7 +12,6 @@ import table from "markdown-table"
 import {CoverageMap, CoverageMapData, createCoverageMap} from "istanbul-lib-coverage"
 import type {FormattedTestResults} from "@jest/test-result/build/types"
 
-const ACTION_NAME = "jest-result"
 const COVERAGE_HEADER = ":loop: **Code coverage**\n\n"
 const TOTAL_COVERAGE_HEADER = "All statements coverage: "
 
@@ -49,20 +48,8 @@ export async function run() {
     const isPR = !!getPullId()
 
     const isCovOk = statementsCov >= minCov
-    let covErrString = ""
-    const comment = getComment(covMap, statementsCov, CWD)
-
-    if (!isCovOk) {
-      covErrString = `Statements coverage less then minimum! (minimum: ${minCov}%; actual: ${statementsCov}% )`
-
-      if (isPR) {
-        core.error(covErrString)
-        core.setFailed(covErrString)
-      } else {
-        core.warning(covErrString)
-      }
-    }
-
+    let covErrString = isCovOk ? "" : `Statements coverage less then minimum! (minimum: ${minCov}%; actual: ${statementsCov}% )`
+    const comment = getComment(covMap, statementsCov, covErrString, CWD)
     const checkPayload = getCheckPayload(results, CWD, isCovOk, covErrString, comment)
     await octokit.checks.create(checkPayload)
 
@@ -77,6 +64,14 @@ export async function run() {
 
     if (!results.success) {
       core.setFailed("Some jest tests failed.")
+    }
+    if (!isCovOk) {
+      if (isPR) {
+        core.error(covErrString)
+        core.setFailed(covErrString)
+      } else {
+        core.warning(covErrString)
+      }
     }
   } catch (error) {
     console.error(error)
@@ -115,12 +110,17 @@ function getMinCoverage(): number {
 function getComment(
   covMap: CoverageMap,
   statementsCov: number,
+  covErrString: string,
   cwd: string,
 ): string | false {
 
   const coverageTable = getCoverageTable(covMap, cwd)
   if (coverageTable) {
-    return COVERAGE_HEADER + TOTAL_COVERAGE_HEADER + statementsCov + "%\n" + coverageTable
+    if (covErrString) {
+      return COVERAGE_HEADER + covErrString + "\n" + coverageTable
+    } else {
+      return COVERAGE_HEADER + TOTAL_COVERAGE_HEADER + statementsCov + "%\n" + coverageTable
+    }
   }
   return false
 }
@@ -193,10 +193,12 @@ function getCheckPayload(results: FormattedTestResults,
 
   const summary = testSummary + "\n\n" + comment
 
+  const name = results.success ? "Code coverage" : "Unit test error"
+
   const payload: Octokit.ChecksCreateParams = {
     ...context.repo,
     head_sha: getSha(),
-    name: ACTION_NAME,
+    name: name,
     status: "completed",
     conclusion: conclusion,
     output: {
