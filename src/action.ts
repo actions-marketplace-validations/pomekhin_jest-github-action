@@ -52,8 +52,8 @@ export async function run() {
     const comment = getComment(covMap, statementsCov, covErrString, CWD)
     const checkPayload = getCheckPayload(results, CWD, isCovOk, covErrString, comment)
     console.log("checkPayload %j", checkPayload)
-    await octokit.checks.create(checkPayload)
-    console.log("octokit.checks %j", octokit.checks)
+    let createResult  = await octokit.checks.create(checkPayload)
+    console.log("createResult: %j", createResult)
 
 
     // Coverage comments
