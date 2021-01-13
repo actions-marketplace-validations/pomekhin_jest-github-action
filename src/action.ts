@@ -67,7 +67,6 @@ export async function run() {
     }
     if (!isCovOk) {
       if (isPR) {
-        core.error(covErrString)
         core.setFailed(covErrString)
       } else {
         core.warning(covErrString)
