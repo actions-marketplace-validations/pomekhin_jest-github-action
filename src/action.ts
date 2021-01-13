@@ -51,7 +51,10 @@ export async function run() {
     let covErrString = isCovOk ? "" : `Statements coverage less then minimum! (minimum: ${minCov}%; actual: ${statementsCov}% )`
     const comment = getComment(covMap, statementsCov, covErrString, CWD)
     const checkPayload = getCheckPayload(results, CWD, isCovOk, covErrString, comment)
+    console.log("checkPayload %j", checkPayload)
     await octokit.checks.create(checkPayload)
+    console.log("octokit.checks %j", octokit.checks)
+
 
     // Coverage comments
     if (getPullId() && shouldCommentCoverage()) {
