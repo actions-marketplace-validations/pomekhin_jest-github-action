@@ -51,9 +51,7 @@ export async function run() {
     let covErrString = isCovOk ? "" : `Statements coverage less then minimum! (minimum: ${minCov}%; actual: ${statementsCov}% )`
     const comment = getComment(covMap, statementsCov, covErrString, CWD)
     const checkPayload = getCheckPayload(results, CWD, isCovOk, covErrString, comment)
-    console.log("checkPayload %j", checkPayload)
-    let createResult  = await octokit.checks.create(checkPayload)
-    console.log("createResult: %j", createResult)
+    await octokit.checks.create(checkPayload)
 
 
     // Coverage comments
@@ -70,7 +68,7 @@ export async function run() {
     }
     if (!isCovOk) {
       if (isPR) {
-        //core.setFailed(covErrString)
+        core.setFailed(covErrString)
       } else {
         core.warning(covErrString)
       }
